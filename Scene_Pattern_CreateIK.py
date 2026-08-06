@@ -21,7 +21,7 @@ ITEMS = {
 def DefaultSetting(path,*arr):
     moduleName = os.path.basename(__file__).replace(".py","")
     ext = "json"
-    name = "Spline Rig"
+    name = "Create IK"
     return({
         "ext":ext,
         "path":path+moduleName+"."+ext,
@@ -92,33 +92,13 @@ def CreateCubeCtrl(name, size=2):
     return cmds.curve(d=1,p=points,n=name)
 
 def DuplicateChain(joints, suffix):
-    # Duplicate cả chain
-    root = cmds.duplicate(
-        joints[0],
-        rr=True,
-        rc=True
-    )[0]
-
-    # Lấy toàn bộ joint theo hierarchy
+    root = cmds.duplicate(joints[0],rr=True,rc=True)[0]
     newJoints = [root]
-    children = cmds.listRelatives(
-        root,
-        ad=True,
-        type="joint",
-        f=False
-    ) or []
-
-    # listRelatives(ad=True) trả ngược thứ tự
+    children = cmds.listRelatives(root,ad=True,type="joint",f=False) or []
     newJoints.extend(reversed(children))
-
-    # Rename
     result = []
-
     for joint in newJoints:
-        result.append(
-            cmds.rename(joint,joint+"_"+suffix)
-        )
-
+        result.append(cmds.rename(joint,joint+"_"+suffix))
     return result
 
 
@@ -137,36 +117,38 @@ def Run(data, *arr):
         if len(objects) != 3:
             cmds.warning("This tool currently requires exactly 3 objects.")
             continue
-        # ----------------------------------------------------
-        # Positions
-        # ----------------------------------------------------
+
+        
+        
+
+        ### CREATE JOINTS ###
+        
+        # Find pos
         pts = []
         for obj in objects:
             p = cmds.xform(obj, q=True, ws=True, t=True)
             pts.append(om.MVector(p))
         A, B, C = pts
 
-        # ----------------------------------------------------
-        # Plane normal
-        # ----------------------------------------------------
+        # Get Normal plane
         normal = ((B - A) ^ (C - B))
         if normal.length() < 0.0001:
             cmds.warning("Objects are collinear.")
             continue
         normal.normalize()
 
-        # ----------------------------------------------------
-        # Create joints
-        # ----------------------------------------------------
+        # Create Joint
         joints = []
+        connectGrps = []
         for obj, pos in zip(objects, pts):
-            jnt = cmds.createNode("joint",n=obj + "_Jnt")
+            jnt = cmds.createNode("joint",n=obj + "_ConnectJoint")
             cmds.xform(jnt,ws=True,t=(pos.x, pos.y, pos.z))
             joints.append(jnt)
+            connectGrp = NLTA_General.GroupMatchObject(obj,obj+"_ConnectGroup")
+            connectGrps.append(connectGrp)
+            
 
-        # ----------------------------------------------------
-        # Build matrices
-        # ----------------------------------------------------
+        # Match to plane
         forwards = [(B - A).normal(),(C - B).normal(),(C - B).normal()]
         for jnt, pos, x in zip(joints, pts, forwards):
             z = (x ^ normal).normal()
@@ -177,114 +159,73 @@ def Run(data, *arr):
                 z.x, z.y, z.z, 0,
                 pos.x,pos.y,pos.z,1
             ]
-
             cmds.xform(jnt,ws=True,matrix=matrix)
-        # ----------------------------------------------------
-        # Parent chain
-        # ----------------------------------------------------
+
+        # Parent joint
         cmds.parent(joints[2], joints[1])
         cmds.parent(joints[1], joints[0])
         if cmds.objExists(parent):
             cmds.parent(joints[0], parent)
         cmds.makeIdentity(joints[0],apply=True,rotate=True)
 
-        # ----------------------------------------------------
-        # Pole Vector Position
-        # ----------------------------------------------------
+        # Parent ConnectGrp to joint:
+        for stt in range(len(connectGrps)):
+            cmds.parent(connectGrps[stt],joints[stt])
 
+
+        ### CREATE POLE VECTOR ###
+
+        poleVectorName = objects[1]+"_PoleVector"
+        # Find postion
         mid = (A + C) * 0.5
-
-        # Đối xứng midpoint qua B
         polePos = B + (B - mid)
 
-        # ----------------------------------------------------
-        # Create Pole Vector Control
-        # ----------------------------------------------------
-
-        poleCtrl = cmds.circle(
-            n="PoleVector_Ctrl",
-            nr=(1, 0, 0),
-            r=2.0,
-            ch=False
-        )[0]
-
-        # Thêm 2 vòng để nhìn giống sphere
-        shape2 = cmds.circle(
-            nr=(0, 1, 0),
-            r=2.0,
-            ch=False
-        )[0]
-
-        shape3 = cmds.circle(
-            nr=(0, 0, 1),
-            r=2.0,
-            ch=False
-        )[0]
-
-        # Parent shape vào poleCtrl
+        # Create Pole Vector
+        poleCtrl = cmds.circle(n=poleVectorName,nr=(1, 0, 0),r=2.0,ch=False)[0] #Shape 1
+        shape2 = cmds.circle(nr=(0, 1, 0),r=2.0,ch=False)[0] #Shape 2
+        shape3 = cmds.circle(nr=(0, 0, 1),r=2.0,ch=False)[0]
         for s in cmds.listRelatives(shape2, s=True, f=True):
             cmds.parent(s, poleCtrl, r=True, s=True)
-
         for s in cmds.listRelatives(shape3, s=True, f=True):
             cmds.parent(s, poleCtrl, r=True, s=True)
-
         cmds.delete(shape2, shape3)
 
-        # Move tới vị trí pole vector
-        cmds.xform(
-            poleCtrl,
-            ws=True,
-            t=(polePos.x, polePos.y, polePos.z)
-        )
+        # Create Offset
+        poleOffset = NLTA_General.CreateOffsetGroup(poleCtrl,poleCtrl+"_GrpOffset")
+
+        # Match to pole Vector position
+        cmds.xform(poleOffset,ws=True,t=(polePos.x, polePos.y, polePos.z))
 
 
-        fkCtrls = []
-        fkOffsets = []
+        ### CREATE IK
+        IKName = objects[2]+"_IK"
+        IKCtrl = CreateCubeCtrl(IKName,size=4)
+        matrix = cmds.xform(joints[-1],q=True,ws=True, matrix=True)
+        cmds.xform(IKCtrl,ws=True,matrix=matrix)
+
+
+        ### CREATE FKS
+        FKCtrls = []
+        FKOffsets = []
         for joint in joints:
-            cltrName = ""
-            ctrlOffset = ""
-            ctrl = CreateCircleCtrl(
-                joint.replace("_Jnt","_Ctrl"),
-                radius=2
-            )
+            FKName = joint+"_FKCtrl"
+            FKOffset = joint+"_FKOffset"
+            FKCtrl = CreateCircleCtrl(FKName,radius=2)
+            NLTA_General.CreateOffsetGroup(FKCtrl,FKOffset)
+            matrix = cmds.xform(joint,q=True,ws=True,matrix=True)
+            cmds.xform(FKOffset,ws=True,matrix=matrix)
+            FKCtrls.append(FKName)
+            FKOffsets.append(FKOffset)
 
-            matrix = cmds.xform(
-                joint,
-                q=True,
-                ws=True,
-                matrix=True
-            )
 
-            cmds.xform(
-                ctrl,
-                ws=True,
-                matrix=matrix
-            )
-            fkCtrls.append(ctrl)
+        """
 
-        endCtrl = CreateCubeCtrl(
-            joints[-1].replace("_Jnt","End_Ctrl"),
-            size=4
-        )
 
-        matrix = cmds.xform(
-            joints[-1],
-            q=True,
-            ws=True,
-            matrix=True
-        )
-
-        cmds.xform(
-            endCtrl,
-            ws=True,
-            matrix=matrix
-        )
 
         #####
 
         ikJoints = DuplicateChain(joints,"_IK")
         fkJoints = DuplicateChain(joints,"_FK")
-
 
         ikHandle, effector = cmds.ikHandle(
             sj=ikJoints[0],
@@ -313,6 +254,7 @@ def Run(data, *arr):
                 ctrlOffsets[i],
                 ctrlCtrls[i - 1]
             )
+        """
 
 def Add(listUI,data,*arr):
     global ITEMS
