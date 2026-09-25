@@ -1,0 +1,7 @@
+OrderID,CustomerID,Product,City,Price,Quantity
+1,C001,Laptop,HCM,1200,2
+2,C002,Phone,Hanoi,NaN,1
+3,C001,Mouse,HCM,25,5
+4,C003,Keyboard,Danang,50,3
+5,C004,Phone,NaN,800,2
+3,C001,Mouse,HCM,25,5

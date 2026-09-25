@@ -80,7 +80,7 @@ class ProductManager():
 
     def showProducts(self):
         for key,val in self.products.items():
-            print(f"Ma san pham {key}: Ten {val['name]}, gia tien {val['price']}")
+            print(f"Ma san pham {key}: Ten {val['name']}, gia tien {val['price']}")
 
     def updateProduct(self):
         updateData = self.newInput({
